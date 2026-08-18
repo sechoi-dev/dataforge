@@ -1,0 +1,87 @@
+name: dataforge
+
+x-backend: &backend
+  build:
+    context: ./backend
+  env_file:
+    - path: .env
+      required: false
+  environment:
+    DATAFORGE_DATABASE_URL: postgresql+psycopg://dataforge:dataforge@postgres:5432/dataforge
+    DATAFORGE_REDIS_URL: redis://redis:6379/0
+    DATAFORGE_CELERY_BROKER_URL: redis://redis:6379/1
+    DATAFORGE_CELERY_RESULT_BACKEND: redis://redis:6379/2
+  restart: unless-stopped
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: dataforge
+      POSTGRES_USER: dataforge
+      POSTGRES_PASSWORD: dataforge
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dataforge -d dataforge"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+  migrate:
+    <<: *backend
+    command: alembic upgrade head
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    <<: *backend
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  worker:
+    <<: *backend
+    command: celery -A app.core.celery_app:celery_app worker --loglevel=INFO
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  scheduler:
+    <<: *backend
+    command: celery -A app.core.celery_app:celery_app beat --loglevel=INFO --schedule=/tmp/celerybeat-schedule
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  redis_data:
