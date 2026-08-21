@@ -23,6 +23,15 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     celery_broker_url: str = "redis://localhost:6379/1"
     celery_result_backend: str = "redis://localhost:6379/2"
+    minio_endpoint: str = "localhost:9000"
+    minio_access_key: str = "dataforge"
+    minio_secret_key: str = "dataforge-dev-password"
+    minio_secure: bool = False
+    minio_bucket: str = "dataforge"
+    maximum_upload_size_bytes: int = Field(default=10 * 1024 * 1024, gt=0)
+    maximum_rows: int = Field(default=1_000_000, gt=0)
+    maximum_columns: int = Field(default=1_000, gt=0)
+    maximum_report_size_bytes: int = Field(default=5 * 1024 * 1024, gt=0)
     readiness_timeout_seconds: float = Field(default=2.0, gt=0, le=30)
 
 

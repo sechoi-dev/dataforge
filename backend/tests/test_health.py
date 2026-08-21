@@ -28,11 +28,12 @@ def test_ready_when_dependencies_are_available(
 ) -> None:
     monkeypatch.setattr(health_module, "check_postgres", lambda _: True)
     monkeypatch.setattr(health_module, "check_redis", lambda _: True)
+    monkeypatch.setattr(health_module, "check_object_storage", lambda _: True)
     response = client.get("/ready")
     assert response.status_code == 200
     assert response.json() == {
         "status": "ready",
-        "dependencies": {"postgres": True, "redis": True},
+        "dependencies": {"postgres": True, "redis": True, "object_storage": True},
     }
 
 
@@ -41,6 +42,7 @@ def test_ready_returns_503_when_a_dependency_is_unavailable(
 ) -> None:
     monkeypatch.setattr(health_module, "check_postgres", lambda _: True)
     monkeypatch.setattr(health_module, "check_redis", lambda _: False)
+    monkeypatch.setattr(health_module, "check_object_storage", lambda _: True)
     response = client.get("/ready")
     assert response.status_code == 503
     assert response.json()["status"] == "not_ready"

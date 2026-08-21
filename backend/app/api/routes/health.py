@@ -18,6 +18,7 @@ class HealthResponse(BaseModel):
 class DependencyStatus(BaseModel):
     postgres: bool
     redis: bool
+    object_storage: bool
 
 
 class ReadinessResponse(BaseModel):
@@ -52,6 +53,12 @@ def check_redis(settings: Settings) -> bool:
         client.close()
 
 
+def check_object_storage(settings: Settings) -> bool:
+    from app.services.storage import StorageService
+
+    return StorageService(settings).check_connection()
+
+
 @router.get("/health", response_model=HealthResponse)
 def health() -> HealthResponse:
     return HealthResponse(status="ok")
@@ -66,8 +73,9 @@ def ready(
     dependencies = DependencyStatus(
         postgres=check_postgres(database_engine),
         redis=check_redis(settings),
+        object_storage=check_object_storage(settings),
     )
-    is_ready = dependencies.postgres and dependencies.redis
+    is_ready = dependencies.postgres and dependencies.redis and dependencies.object_storage
     if not is_ready:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
     return ReadinessResponse(

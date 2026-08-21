@@ -8,6 +8,7 @@ celery_app = Celery(
     "dataforge",
     broker=settings.celery_broker_url,
     backend=settings.celery_result_backend,
+    include=["app.workers.tasks"],
 )
 celery_app.conf.update(
     broker_connection_retry_on_startup=True,
