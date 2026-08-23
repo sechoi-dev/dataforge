@@ -50,10 +50,28 @@ class JobRead(BaseModel):
     dataset_version_id: uuid.UUID
     job_type: str
     status: JobStatus
+    retry_count: int
+    max_retries: int
+    next_retry_at: datetime | None
+    error_code: str | None
     error_message: str | None
     created_at: datetime
     started_at: datetime | None
     completed_at: datetime | None
+
+
+class JobAttemptRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    job_id: uuid.UUID
+    attempt_number: int
+    status: str
+    started_at: datetime
+    finished_at: datetime | None
+    duration_ms: int | None
+    error_code: str | None
+    error_message: str | None
 
 
 class UploadAccepted(BaseModel):

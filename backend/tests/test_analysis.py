@@ -31,3 +31,14 @@ def test_analyze_csv_rejects_row_limit(tmp_path: Path) -> None:
 
     with pytest.raises(CsvAnalysisError, match="row limit"):
         analyze_csv(csv_path, file_size_bytes=8, max_rows=1, max_columns=10)
+
+
+def test_analyze_csv_rejects_malformed_fixture() -> None:
+    csv_path = Path(__file__).parent / "fixtures" / "malformed.csv"
+    with pytest.raises(CsvAnalysisError, match="readable UTF-8 CSV"):
+        analyze_csv(
+            csv_path,
+            file_size_bytes=csv_path.stat().st_size,
+            max_rows=100,
+            max_columns=10,
+        )

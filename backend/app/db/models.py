@@ -24,8 +24,10 @@ from app.db.base import Base
 class JobStatus(StrEnum):
     QUEUED = "QUEUED"
     RUNNING = "RUNNING"
+    RETRYING = "RETRYING"
     SUCCEEDED = "SUCCEEDED"
     FAILED = "FAILED"
+    DEAD_LETTERED = "DEAD_LETTERED"
 
 
 class Dataset(Base):
@@ -61,7 +63,7 @@ class DatasetVersion(Base):
     content_type: Mapped[str] = mapped_column(String(100))
     file_size_bytes: Mapped[int] = mapped_column(BigInteger)
     file_sha256: Mapped[str] = mapped_column(String(64), index=True)
-    input_object_key: Mapped[str] = mapped_column(String(500), unique=True)
+    input_object_key: Mapped[str] = mapped_column(String(500))
     report_object_key: Mapped[str | None] = mapped_column(String(500), unique=True)
     row_count: Mapped[int | None] = mapped_column(BigInteger)
     column_count: Mapped[int | None] = mapped_column(Integer)
@@ -85,6 +87,12 @@ class Job(Base):
     status: Mapped[JobStatus] = mapped_column(
         Enum(JobStatus, name="job_status"), default=JobStatus.QUEUED, index=True
     )
+    idempotency_key: Mapped[str | None] = mapped_column(String(200), unique=True)
+    request_fingerprint: Mapped[str | None] = mapped_column(String(64))
+    retry_count: Mapped[int] = mapped_column(Integer, default=0)
+    max_retries: Mapped[int] = mapped_column(Integer, default=3)
+    next_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    error_code: Mapped[str | None] = mapped_column(String(100))
     error_message: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -94,3 +102,24 @@ class Job(Base):
     )
 
     dataset_version: Mapped[DatasetVersion] = relationship(back_populates="job")
+    attempts: Mapped[list["JobAttempt"]] = relationship(
+        back_populates="job", cascade="all, delete-orphan", order_by="JobAttempt.attempt_number"
+    )
+
+
+class JobAttempt(Base):
+    __tablename__ = "job_attempts"
+    __table_args__ = (UniqueConstraint("job_id", "attempt_number", name="uq_job_attempt_number"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    job_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("jobs.id", ondelete="CASCADE"), index=True)
+    attempt_number: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(30))
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    duration_ms: Mapped[int | None] = mapped_column(BigInteger)
+    error_code: Mapped[str | None] = mapped_column(String(100))
+    error_message: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    job: Mapped[Job] = relationship(back_populates="attempts")

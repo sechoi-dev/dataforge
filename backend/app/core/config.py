@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     maximum_rows: int = Field(default=1_000_000, gt=0)
     maximum_columns: int = Field(default=1_000, gt=0)
     maximum_report_size_bytes: int = Field(default=5 * 1024 * 1024, gt=0)
+    job_max_retries: int = Field(default=3, ge=0, le=20)
+    retry_base_seconds: float = Field(default=2.0, gt=0)
+    retry_maximum_seconds: float = Field(default=300.0, gt=0)
     readiness_timeout_seconds: float = Field(default=2.0, gt=0, le=30)
 
 

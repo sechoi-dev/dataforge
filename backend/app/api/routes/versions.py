@@ -4,14 +4,26 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    Header,
+    HTTPException,
+    Response,
+    UploadFile,
+    status,
+)
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
 from app.db.models import Dataset, DatasetVersion, Job
 from app.db.session import get_db
 from app.schemas.datasets import DatasetVersionRead, UploadAccepted
+from app.services.idempotency import input_object_key, request_fingerprint
 from app.services.storage import StorageService
 from app.workers.tasks import analyze_dataset_version
 
@@ -25,6 +37,25 @@ def get_storage() -> StorageService:
 
 def enqueue_analysis(job_id: str) -> None:
     analyze_dataset_version.delay(job_id)
+
+
+def accepted_response(db: Session, job: Job) -> UploadAccepted:
+    version = db.get(DatasetVersion, job.dataset_version_id)
+    if version is None:
+        raise RuntimeError("Idempotent job has no dataset version.")
+    return UploadAccepted(dataset_version=DatasetVersionRead.model_validate(version), job=job)
+
+
+def find_idempotent_job(db: Session, key: str, fingerprint: str) -> Job | None:
+    existing = db.scalar(select(Job).where(Job.idempotency_key == key))
+    if existing is None:
+        return None
+    if existing.request_fingerprint != fingerprint:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Idempotency-Key was already used with different input.",
+        )
+    return existing
 
 
 def copy_upload(upload: UploadFile, destination: Path, maximum_bytes: int) -> tuple[int, str]:
@@ -54,6 +85,7 @@ def upload_version(
     db: Annotated[Session, Depends(get_db)],
     settings: Annotated[Settings, Depends(get_settings)],
     storage: Annotated[StorageService, Depends(get_storage)],
+    idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=200)],
     description: Annotated[str | None, Form(max_length=2_000)] = None,
 ) -> UploadAccepted:
     dataset = db.get(Dataset, dataset_id)
@@ -72,19 +104,42 @@ def upload_version(
             detail="Unsupported CSV content type.",
         )
 
+    idempotency_key = idempotency_key.strip()
+    if not idempotency_key:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Idempotency-Key cannot be blank.",
+        )
+    content_type = file.content_type or "text/csv"
     version_id = uuid.uuid4()
     with TemporaryDirectory(prefix="dataforge-upload-") as temporary_directory:
         input_path = Path(temporary_directory) / "input.csv"
         file_size, file_hash = copy_upload(file, input_path, settings.maximum_upload_size_bytes)
+        fingerprint = request_fingerprint(
+            dataset_id=dataset_id,
+            file_sha256=file_hash,
+            filename=safe_filename,
+            content_type=content_type,
+            description=description,
+        )
+        existing = find_idempotent_job(db, idempotency_key, fingerprint)
+        if existing is not None:
+            return accepted_response(db, existing)
+
+        locked_dataset = db.scalar(
+            select(Dataset).where(Dataset.id == dataset_id).with_for_update()
+        )
+        if locked_dataset is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found.")
         current_version = db.scalar(
             select(func.coalesce(func.max(DatasetVersion.version_number), 0)).where(
                 DatasetVersion.dataset_id == dataset_id
             )
         )
         version_number = int(current_version or 0) + 1
-        object_key = f"datasets/{dataset_id}/versions/{version_id}/input.csv"
+        object_key = input_object_key(dataset_id, file_hash)
         storage.ensure_bucket()
-        storage.upload_file(object_key, input_path, file.content_type or "text/csv")
+        storage.upload_file(object_key, input_path, content_type)
 
     version = DatasetVersion(
         id=version_id,
@@ -92,18 +147,33 @@ def upload_version(
         version_number=version_number,
         original_filename=safe_filename,
         description=description,
-        content_type=file.content_type or "text/csv",
+        content_type=content_type,
         file_size_bytes=file_size,
         file_sha256=file_hash,
         input_object_key=object_key,
     )
-    job = Job(dataset_version=version)
+    job = Job(
+        dataset_version=version,
+        idempotency_key=idempotency_key,
+        request_fingerprint=fingerprint,
+        max_retries=settings.job_max_retries,
+    )
     db.add_all([version, job])
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        existing = find_idempotent_job(db, idempotency_key, fingerprint)
+        if existing is not None:
+            return accepted_response(db, existing)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A concurrent dataset version was created; retry with a new Idempotency-Key.",
+        ) from None
     db.refresh(version)
     db.refresh(job)
     enqueue_analysis(str(job.id))
-    return UploadAccepted(dataset_version=DatasetVersionRead.model_validate(version), job=job)
+    return accepted_response(db, job)
 
 
 @router.get("", response_model=list[DatasetVersionRead])

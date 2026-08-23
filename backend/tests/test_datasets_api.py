@@ -69,6 +69,7 @@ def test_create_dataset_and_queue_csv_upload(
 
     upload_response = client.post(
         f"/api/v1/datasets/{dataset_id}/versions",
+        headers={"Idempotency-Key": "survey-upload-1"},
         files={"file": ("survey.csv", b"id,name\n1,Ada\n", "text/csv")},
         data={"description": "First export"},
     )
@@ -95,8 +96,61 @@ def test_report_is_unavailable_before_worker_finishes(
     dataset_id = client.post("/api/v1/datasets", json={"name": "Example"}).json()["id"]
     version = client.post(
         f"/api/v1/datasets/{dataset_id}/versions",
+        headers={"Idempotency-Key": "example-upload-1"},
         files={"file": ("example.csv", b"id\n1\n", "text/csv")},
     ).json()["dataset_version"]
 
     response = client.get(f"/api/v1/datasets/{dataset_id}/versions/{version['id']}/report")
     assert response.status_code == 409
+
+
+def test_identical_idempotent_upload_returns_existing_job(
+    api_context: tuple[TestClient, sessionmaker[Session], FakeStorage, list[str]],
+) -> None:
+    client, test_sessions, _, queued_jobs = api_context
+    dataset_id = client.post("/api/v1/datasets", json={"name": "Idempotent"}).json()["id"]
+    url = f"/api/v1/datasets/{dataset_id}/versions"
+    headers = {"Idempotency-Key": "stable-key"}
+    files = {"file": ("same.csv", b"id\n1\n", "text/csv")}
+
+    first = client.post(url, headers=headers, files=files)
+    second = client.post(url, headers=headers, files=files)
+
+    assert first.status_code == second.status_code == 202
+    assert first.json() == second.json()
+    assert len(queued_jobs) == 1
+    with test_sessions() as session:
+        assert len(list(session.scalars(select(Job)))) == 1
+        assert len(list(session.scalars(select(DatasetVersion)))) == 1
+
+
+def test_idempotency_key_reuse_with_different_input_conflicts(
+    api_context: tuple[TestClient, sessionmaker[Session], FakeStorage, list[str]],
+) -> None:
+    client, _, _, _ = api_context
+    dataset_id = client.post("/api/v1/datasets", json={"name": "Conflict"}).json()["id"]
+    url = f"/api/v1/datasets/{dataset_id}/versions"
+    headers = {"Idempotency-Key": "reused-key"}
+
+    assert (
+        client.post(
+            url, headers=headers, files={"file": ("data.csv", b"id\n1\n", "text/csv")}
+        ).status_code
+        == 202
+    )
+    conflict = client.post(
+        url, headers=headers, files={"file": ("data.csv", b"id\n2\n", "text/csv")}
+    )
+    assert conflict.status_code == 409
+
+
+def test_upload_requires_idempotency_key(
+    api_context: tuple[TestClient, sessionmaker[Session], FakeStorage, list[str]],
+) -> None:
+    client, _, _, _ = api_context
+    dataset_id = client.post("/api/v1/datasets", json={"name": "Required key"}).json()["id"]
+    response = client.post(
+        f"/api/v1/datasets/{dataset_id}/versions",
+        files={"file": ("data.csv", b"id\n1\n", "text/csv")},
+    )
+    assert response.status_code == 422

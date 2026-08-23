@@ -1,8 +1,9 @@
 # DataForge
 
 DataForge is a distributed data-quality and dataset-validation platform. The repository is
-currently includes **Phase 2: Basic asynchronous analysis**. Users can create a logical dataset,
-upload a CSV version, poll its background job, and retrieve a JSON quality report.
+currently includes **Phase 3: Reliable job processing**. Users can create a logical dataset,
+upload a CSV version idempotently, poll its background job, inspect attempts, and retrieve a JSON
+quality report.
 
 ## Current services
 
@@ -46,15 +47,20 @@ Upload a CSV using the returned dataset ID:
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/datasets/DATASET_ID/versions \
+  -H "Idempotency-Key: monthly-export-2026-08" \
   -F "file=@sample.csv;type=text/csv"
 ```
 
 The upload returns HTTP 202 with a version and job. Poll
 `GET /api/v1/jobs/JOB_ID`, then retrieve
 `GET /api/v1/datasets/DATASET_ID/versions/VERSION_ID/report` after the job succeeds.
+Identical requests with the same idempotency key return the original version and job. Reusing a
+key with different input returns HTTP 409. Attempt history is available at
+`GET /api/v1/jobs/JOB_ID/attempts`; failed and dead-lettered jobs can be resubmitted through
+`POST /api/v1/jobs/JOB_ID/retry`.
 
 Stop the stack with `docker compose down`. Add `--volumes` only when you intentionally want to
-delete local PostgreSQL and Redis data.
+delete local PostgreSQL, Redis, and MinIO data.
 
 ## Backend development
 
@@ -78,9 +84,12 @@ Copy `.env.example` to `.env` to customize runtime configuration. Every setting 
 The API, worker, and scheduler share one backend image and application package. PostgreSQL,
 Redis, and MinIO use persistent named volumes. Compose waits for dependency health and for the
 one-shot migration service before starting application processes. CSV uploads are bounded and
-stored in MinIO; pandas analysis runs only in the Celery worker.
+stored under deterministic MinIO keys; pandas analysis runs only in the Celery worker. Workers
+use an atomic conditional update to claim jobs, so duplicate Celery delivery cannot start two
+attempts. Delivery is at least once, not exactly once.
 
-Phase 2 analysis is intentionally limited to a basic profile, per-column missingness, exact
-duplicate rows, and JSON reports. Idempotency, atomic claiming, retries, dead-lettering,
-cancellation, richer validation, HTML reports, comparisons, authentication, frontend, and
-observability belong to later phases in `docs/master-spec.md`.
+Analysis remains intentionally limited to a basic profile, per-column missingness, exact duplicate
+rows, and JSON reports. Transient failures use exponential backoff with jitter and eventually
+dead-letter while preserving attempt history; malformed CSVs fail immediately. Worker leases,
+crash recovery, cancellation, richer validation, HTML reports, comparisons, authentication,
+frontend, and observability belong to later phases in `docs/master-spec.md`.
