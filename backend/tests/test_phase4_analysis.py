@@ -1,11 +1,12 @@
 import uuid
 from pathlib import Path
+from typing import cast
 
 import pandas as pd
 
 from app.analysis.basic import analyze_csv
 from app.analysis.rules import RuleSpec, evaluate_rules
-from app.db.models import RuleType, Severity
+from app.db.models import DatasetVersion, RuleType, Severity
 from app.services.reporting import build_html_report
 from app.workers.tasks import build_report
 
@@ -92,7 +93,7 @@ def test_html_report_escapes_uploaded_content(tmp_path: Path) -> None:
         file_size_bytes = csv_path.stat().st_size
         file_sha256 = "0" * 64
 
-    html = build_html_report(build_report(Version(), analysis)).decode()
+    html = build_html_report(build_report(cast(DatasetVersion, Version()), analysis)).decode()
 
     assert "DataForge quality report" in html
     assert "&lt;unsafe&gt;.csv" in html
