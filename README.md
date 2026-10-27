@@ -1,9 +1,10 @@
 # DataForge
 
-DataForge is a distributed data-quality and dataset-validation platform. The repository is
-currently includes **Phase 3: Reliable job processing**. Users can create a logical dataset,
-upload a CSV version idempotently, poll its background job, inspect attempts, and retrieve a JSON
-quality report.
+DataForge is a distributed data-quality and dataset-validation platform. The repository
+currently includes **Phase 5: Version comparison**. Users can define dataset validation rules,
+upload a CSV version idempotently, poll its background job, inspect attempts, and retrieve JSON
+or HTML quality reports with explainable scores and deductions. Versions can be compared for
+schema and profile drift, category changes, and dataset overlap.
 
 ## Current services
 
@@ -13,6 +14,10 @@ quality report.
 - MinIO for S3-compatible input and report storage
 - Separate Celery worker and beat scheduler processes
 - Alembic migration baseline, applied before backend services start
+- Numeric and categorical profiling, mixed-type detection, and IQR outlier observations
+- Persisted validation results and explainable quality scoring
+- JSON and escaped, human-readable HTML reports
+- Persisted, downloadable version-comparison reports with severity-classified changes
 - Ruff, mypy, pytest, and GitHub Actions checks
 
 ## Start locally
@@ -59,6 +64,23 @@ key with different input returns HTTP 409. Attempt history is available at
 `GET /api/v1/jobs/JOB_ID/attempts`; failed and dead-lettered jobs can be resubmitted through
 `POST /api/v1/jobs/JOB_ID/retry`.
 
+Create dataset-level validation rules before uploading a version at
+`POST /api/v1/datasets/DATASET_ID/rules`. Supported checks include nullability, uniqueness,
+numeric bounds and ranges, allowed values, regular expressions, expected types, parseable dates,
+minimum row counts, and maximum missing or duplicate percentages. Retrieve the readable HTML
+report by adding `?format=html` to the report URL.
+
+Compare two versions, optionally using identifier columns and normalized text for overlap:
+
+```bash
+curl -X POST http://localhost:8000/api/v1/comparisons \
+  -H "Content-Type: application/json" \
+  -d '{"left_version_id":"LEFT_VERSION_ID","right_version_id":"RIGHT_VERSION_ID","selected_key_columns":["id"],"normalize_text":true}'
+```
+
+The response includes a comparison ID. Download its JSON report from
+`GET /api/v1/comparisons/COMPARISON_ID/report`.
+
 Stop the stack with `docker compose down`. Add `--volumes` only when you intentionally want to
 delete local PostgreSQL, Redis, and MinIO data.
 
@@ -88,8 +110,9 @@ stored under deterministic MinIO keys; pandas analysis runs only in the Celery w
 use an atomic conditional update to claim jobs, so duplicate Celery delivery cannot start two
 attempts. Delivery is at least once, not exactly once.
 
-Analysis remains intentionally limited to a basic profile, per-column missingness, exact duplicate
-rows, and JSON reports. Transient failures use exponential backoff with jitter and eventually
-dead-letter while preserving attempt history; malformed CSVs fail immediately. Worker leases,
-crash recovery, cancellation, richer validation, HTML reports, comparisons, authentication,
-frontend, and observability belong to later phases in `docs/master-spec.md`.
+Analysis includes numeric and categorical summaries, mixed-type detection, exact duplicates,
+IQR outlier observations, custom validation rules, and an explainable weighted quality score.
+Reports are stored as JSON and escaped standalone HTML. Transient failures use exponential
+backoff with jitter and eventually dead-letter while preserving attempt history; malformed CSVs
+fail immediately. Progress and cancellation, crash recovery, authentication, frontend, and
+observability belong to later phases in `docs/master-spec.md`.

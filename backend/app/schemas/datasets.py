@@ -39,6 +39,7 @@ class DatasetVersionRead(BaseModel):
         validation_alias="schema_json", serialization_alias="schema_json"
     )
     profile_summary_json: dict[str, Any] | None
+    quality_score: float | None
     created_at: datetime
     analysis_completed_at: datetime | None
 

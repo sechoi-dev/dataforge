@@ -2,7 +2,7 @@ import hashlib
 import uuid
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import (
     APIRouter,
@@ -11,6 +11,7 @@ from fastapi import (
     Form,
     Header,
     HTTPException,
+    Query,
     Response,
     UploadFile,
     status,
@@ -215,11 +216,16 @@ def get_report(
     version_id: uuid.UUID,
     db: Annotated[Session, Depends(get_db)],
     storage: Annotated[StorageService, Depends(get_storage)],
+    report_format: Annotated[Literal["json", "html"], Query(alias="format")] = "json",
 ) -> Response:
     version = find_version(db, dataset_id, version_id)
-    if version.report_object_key is None:
+    object_key = (
+        version.html_report_object_key if report_format == "html" else version.report_object_key
+    )
+    if object_key is None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Report is not available until analysis succeeds.",
         )
-    return Response(storage.get_bytes(version.report_object_key), media_type="application/json")
+    media_type = "text/html; charset=utf-8" if report_format == "html" else "application/json"
+    return Response(storage.get_bytes(object_key), media_type=media_type)

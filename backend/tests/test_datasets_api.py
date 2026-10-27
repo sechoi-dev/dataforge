@@ -7,6 +7,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.api.routes import comparisons as comparisons_module
 from app.api.routes import versions as versions_module
 from app.db.base import Base
 from app.db.models import DatasetVersion, Job, JobStatus
@@ -27,6 +28,13 @@ class FakeStorage:
 
     def get_bytes(self, object_key: str) -> bytes:
         return self.uploaded[object_key]
+
+    def download_file(self, object_key: str, path: Any) -> None:
+        path.write_bytes(self.uploaded[object_key])
+
+    def put_bytes(self, object_key: str, content: bytes, content_type: str) -> None:
+        del content_type
+        self.uploaded[object_key] = content
 
 
 @pytest.fixture
@@ -49,6 +57,7 @@ def api_context(
 
     app.dependency_overrides[get_db] = override_db
     app.dependency_overrides[versions_module.get_storage] = lambda: storage
+    app.dependency_overrides[comparisons_module.get_storage] = lambda: storage
     monkeypatch.setattr(versions_module, "enqueue_analysis", queued_jobs.append)
     with TestClient(app) as client:
         yield client, test_sessions, storage, queued_jobs
@@ -154,3 +163,81 @@ def test_upload_requires_idempotency_key(
         files={"file": ("data.csv", b"id\n1\n", "text/csv")},
     )
     assert response.status_code == 422
+
+
+def test_validation_rule_crud(
+    api_context: tuple[TestClient, sessionmaker[Session], FakeStorage, list[str]],
+) -> None:
+    client, _, _, _ = api_context
+    dataset_id = client.post("/api/v1/datasets", json={"name": "Validated"}).json()["id"]
+    url = f"/api/v1/datasets/{dataset_id}/rules"
+
+    created = client.post(
+        url,
+        json={
+            "column_name": "age",
+            "rule_type": "range",
+            "parameters": {"minimum": 0, "maximum": 120},
+            "severity": "critical",
+        },
+    )
+    assert created.status_code == 201
+    rule_id = created.json()["id"]
+    assert client.get(url).json()[0]["parameters"] == {"minimum": 0, "maximum": 120}
+
+    updated = client.patch(f"{url}/{rule_id}", json={"is_enabled": False})
+    assert updated.status_code == 200
+    assert updated.json()["is_enabled"] is False
+    assert client.delete(f"{url}/{rule_id}").status_code == 204
+    assert client.get(url).json() == []
+
+
+def test_validation_rule_rejects_invalid_configuration(
+    api_context: tuple[TestClient, sessionmaker[Session], FakeStorage, list[str]],
+) -> None:
+    client, _, _, _ = api_context
+    dataset_id = client.post("/api/v1/datasets", json={"name": "Invalid rule"}).json()["id"]
+    response = client.post(
+        f"/api/v1/datasets/{dataset_id}/rules",
+        json={
+            "column_name": "age",
+            "rule_type": "range",
+            "parameters": {"minimum": 120, "maximum": 0},
+        },
+    )
+    assert response.status_code == 422
+
+
+def test_compare_versions_and_download_report(
+    api_context: tuple[TestClient, sessionmaker[Session], FakeStorage, list[str]],
+) -> None:
+    client, _, _, _ = api_context
+    dataset_id = client.post("/api/v1/datasets", json={"name": "History"}).json()["id"]
+    versions_url = f"/api/v1/datasets/{dataset_id}/versions"
+    left = client.post(
+        versions_url,
+        headers={"Idempotency-Key": "history-left"},
+        files={"file": ("left.csv", b"id,status\n1,active\n2,inactive\n", "text/csv")},
+    ).json()["dataset_version"]
+    right = client.post(
+        versions_url,
+        headers={"Idempotency-Key": "history-right"},
+        files={"file": ("right.csv", b"id,status\n1,active\n3,pending\n", "text/csv")},
+    ).json()["dataset_version"]
+
+    response = client.post(
+        "/api/v1/comparisons",
+        json={
+            "left_version_id": left["id"],
+            "right_version_id": right["id"],
+            "selected_key_columns": ["id"],
+        },
+    )
+
+    assert response.status_code == 201
+    comparison = response.json()
+    assert comparison["status"] == "SUCCEEDED"
+    report_response = client.get(f"/api/v1/comparisons/{comparison['id']}/report")
+    assert report_response.status_code == 200
+    assert "attachment" in report_response.headers["content-disposition"]
+    assert report_response.json()["overlap"]["selected_keys"]["overlapping_row_count"] == 1

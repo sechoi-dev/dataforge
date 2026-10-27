@@ -6,17 +6,27 @@ from tempfile import TemporaryDirectory
 from typing import Any
 
 from minio.error import S3Error
-from sqlalchemy import update
+from sqlalchemy import delete, select, update
 from sqlalchemy.exc import OperationalError
 from urllib3.exceptions import HTTPError
 
 from app.analysis.basic import CsvAnalysisError, analyze_csv
+from app.analysis.rules import RuleSpec
 from app.core.celery_app import celery_app
 from app.core.config import get_settings
-from app.db.models import DatasetVersion, Job, JobAttempt, JobStatus
+from app.db.models import (
+    DatasetVersion,
+    Job,
+    JobAttempt,
+    JobStatus,
+    Severity,
+    ValidationResult,
+    ValidationRule,
+)
 from app.db.session import SessionLocal
-from app.services.idempotency import report_object_key
+from app.services.idempotency import html_report_object_key, report_object_key
 from app.services.jobs import claim_job, retry_delay_seconds, transition_job
+from app.services.reporting import build_html_report
 from app.services.storage import StorageService
 
 TRANSIENT_S3_CODES = {"InternalError", "RequestTimeout", "ServiceUnavailable", "SlowDown"}
@@ -82,6 +92,24 @@ def run_analysis_job(
             version = session.get(DatasetVersion, job.dataset_version_id)
             if version is None:
                 raise ValueError("Dataset version no longer exists.")
+            configured_rules = list(
+                session.scalars(
+                    select(ValidationRule).where(
+                        ValidationRule.dataset_id == version.dataset_id,
+                        ValidationRule.is_enabled.is_(True),
+                    )
+                )
+            )
+            rule_specs = [
+                RuleSpec(
+                    id=rule.id,
+                    column_name=rule.column_name,
+                    rule_type=rule.rule_type,
+                    parameters=rule.parameters_json,
+                    severity=rule.severity,
+                )
+                for rule in configured_rules
+            ]
             with TemporaryDirectory(prefix="dataforge-") as temporary_directory:
                 input_path = Path(temporary_directory) / "input.csv"
                 storage.download_file(version.input_object_key, input_path)
@@ -90,6 +118,7 @@ def run_analysis_job(
                     file_size_bytes=version.file_size_bytes,
                     max_rows=settings.maximum_rows,
                     max_columns=settings.maximum_columns,
+                    rules=rule_specs,
                 )
 
             report = build_report(version, analysis)
@@ -98,13 +127,45 @@ def run_analysis_job(
                 raise ValueError("Generated report exceeds the configured size limit.")
             report_key = report_object_key(version.dataset_id, version.id)
             storage.put_bytes(report_key, report_bytes, "application/json")
+            html_bytes = build_html_report(report)
+            if len(html_bytes) > settings.maximum_report_size_bytes:
+                raise ValueError("Generated HTML report exceeds the configured size limit.")
+            html_key = html_report_object_key(version.dataset_id, version.id)
+            storage.put_bytes(html_key, html_bytes, "text/html; charset=utf-8")
+
+            session.execute(
+                delete(ValidationResult).where(
+                    ValidationResult.dataset_version_id == version.id
+                )
+            )
+            for result in [
+                *analysis["automatic_issues"],
+                *analysis["validation_rule_results"],
+            ]:
+                rule_id = result["validation_rule_id"]
+                session.add(
+                    ValidationResult(
+                        dataset_version_id=version.id,
+                        validation_rule_id=uuid.UUID(rule_id) if rule_id else None,
+                        category=str(result["category"]),
+                        check_name=str(result["check_name"]),
+                        status=str(result["status"]),
+                        severity=Severity(str(result["severity"])),
+                        affected_count=int(result["affected_count"]),
+                        affected_percentage=float(result["affected_percentage"]),
+                        message=str(result["message"]),
+                        details_json=dict(result["details"]),
+                    )
+                )
 
             profile = analysis["profile"]
             version.report_object_key = report_key
+            version.html_report_object_key = html_key
             version.row_count = int(profile["row_count"])
             version.column_count = int(profile["column_count"])
             version.schema_json = dict(profile["inferred_data_types"])
             version.profile_summary_json = profile
+            version.quality_score = float(analysis["quality_score"]["overall_score"])
             version.analysis_completed_at = datetime.now(UTC)
             transition_job(job, JobStatus.SUCCEEDED)
             job.completed_at = datetime.now(UTC)

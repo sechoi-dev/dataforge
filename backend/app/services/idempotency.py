@@ -28,3 +28,11 @@ def input_object_key(dataset_id: uuid.UUID, file_sha256: str) -> str:
 
 def report_object_key(dataset_id: uuid.UUID, version_id: uuid.UUID) -> str:
     return f"datasets/{dataset_id}/reports/{version_id}.json"
+
+
+def html_report_object_key(dataset_id: uuid.UUID, version_id: uuid.UUID) -> str:
+    return f"datasets/{dataset_id}/reports/{version_id}.html"
+
+
+def comparison_object_key(comparison_id: uuid.UUID) -> str:
+    return f"comparisons/{comparison_id}.json"

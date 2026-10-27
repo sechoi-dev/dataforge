@@ -7,7 +7,17 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import Settings
 from app.db.base import Base
-from app.db.models import Dataset, DatasetVersion, Job, JobAttempt, JobStatus
+from app.db.models import (
+    Dataset,
+    DatasetVersion,
+    Job,
+    JobAttempt,
+    JobStatus,
+    RuleType,
+    Severity,
+    ValidationResult,
+    ValidationRule,
+)
 from app.services.storage import StorageService
 from app.workers import tasks
 
@@ -31,6 +41,15 @@ class ContentStorage(StorageService):
 
     def put_bytes(self, object_key: str, content: bytes, content_type: str) -> None:
         del object_key, content, content_type
+
+
+class RecordingStorage(ContentStorage):
+    def __init__(self, content: bytes) -> None:
+        super().__init__(content)
+        self.reports: dict[str, tuple[bytes, str]] = {}
+
+    def put_bytes(self, object_key: str, content: bytes, content_type: str) -> None:
+        self.reports[object_key] = (content, content_type)
 
 
 @pytest.fixture
@@ -104,3 +123,44 @@ def test_exhausted_retryable_failure_dead_letters(
         job = session.get(Job, job_id)
         assert job is not None and job.status == JobStatus.DEAD_LETTERED
         assert len(list(session.scalars(select(JobAttempt)))) == 1
+
+
+def test_success_persists_score_results_and_both_reports(
+    reliability_db: tuple[sessionmaker[Session], uuid.UUID],
+) -> None:
+    sessions, job_id = reliability_db
+    with sessions() as session:
+        job = session.get(Job, job_id)
+        assert job is not None
+        version = session.get(DatasetVersion, job.dataset_version_id)
+        assert version is not None
+        session.add(
+            ValidationRule(
+                dataset_id=version.dataset_id,
+                column_name="age",
+                rule_type=RuleType.MAX_VALUE,
+                parameters_json={"value": 120},
+                severity=Severity.CRITICAL,
+            )
+        )
+        session.commit()
+
+    storage = RecordingStorage(b"name,age\nAda,30\n,150\n")
+    result = tasks.run_analysis_job(job_id, storage)
+
+    assert result == (JobStatus.SUCCEEDED, None)
+    assert sorted(content_type for _, content_type in storage.reports.values()) == [
+        "application/json",
+        "text/html; charset=utf-8",
+    ]
+    with sessions() as session:
+        job = session.get(Job, job_id)
+        assert job is not None
+        version = session.get(DatasetVersion, job.dataset_version_id)
+        assert version is not None and version.quality_score is not None
+        assert version.quality_score < 100
+        assert version.report_object_key is not None
+        assert version.html_report_object_key is not None
+        results = list(session.scalars(select(ValidationResult)))
+        assert any(item.check_name == "max_value" and item.status == "failed" for item in results)
+        assert any(item.check_name == "missing_values" for item in results)
