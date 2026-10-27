@@ -61,12 +61,15 @@ def _scorecard(score: dict[str, Any]) -> str:
         f"<td>{score['weights'][name] * 100:.0f}%</td></tr>"
         for name, value in score["category_scores"].items()
     )
-    deductions = "".join(
-        f"<tr><td>{escape(str(item['category']))}</td><td>{item['points']}</td>"
-        f"<td class='{escape(str(item['severity']))}'>{escape(str(item['severity']))}</td>"
-        f"<td>{escape(str(item['reason']))}</td></tr>"
-        for item in score["deductions"]
-    ) or "<tr><td colspan='4'>No score deductions.</td></tr>"
+    deductions = (
+        "".join(
+            f"<tr><td>{escape(str(item['category']))}</td><td>{item['points']}</td>"
+            f"<td class='{escape(str(item['severity']))}'>{escape(str(item['severity']))}</td>"
+            f"<td>{escape(str(item['reason']))}</td></tr>"
+            for item in score["deductions"]
+        )
+        or "<tr><td colspan='4'>No score deductions.</td></tr>"
+    )
     return (
         "<h2>Quality score</h2><table><thead><tr><th>Category</th><th>Score</th>"
         f"<th>Weight</th></tr></thead><tbody>{score_rows}</tbody></table>"
@@ -76,13 +79,16 @@ def _scorecard(score: dict[str, Any]) -> str:
 
 
 def _issues(issues: list[dict[str, Any]]) -> str:
-    rows = "".join(
-        f"<tr><td>{escape(str(item['check_name']))}</td><td>{escape(str(item['status']))}</td>"
-        f"<td class='{escape(str(item['severity']))}'>{escape(str(item['severity']))}</td>"
-        f"<td>{item['affected_count']} ({item['affected_percentage']}%)</td>"
-        f"<td>{escape(str(item['message']))}</td></tr>"
-        for item in issues
-    ) or "<tr><td colspan='5'>No issues or custom-rule results.</td></tr>"
+    rows = (
+        "".join(
+            f"<tr><td>{escape(str(item['check_name']))}</td><td>{escape(str(item['status']))}</td>"
+            f"<td class='{escape(str(item['severity']))}'>{escape(str(item['severity']))}</td>"
+            f"<td>{item['affected_count']} ({item['affected_percentage']}%)</td>"
+            f"<td>{escape(str(item['message']))}</td></tr>"
+            for item in issues
+        )
+        or "<tr><td colspan='5'>No issues or custom-rule results.</td></tr>"
+    )
     return (
         "<h2>Issues and validation results</h2><table><thead><tr><th>Check</th>"
         "<th>Status</th><th>Severity</th><th>Affected</th><th>Explanation</th></tr>"
@@ -103,11 +109,14 @@ def _missing(values: dict[str, Any]) -> str:
 
 
 def _details(title: str, values: dict[str, Any]) -> str:
-    rows = "".join(
-        f"<tr><td>{escape(column)}</td><td><code>{escape(json.dumps(detail, sort_keys=True))}"
-        "</code></td></tr>"
-        for column, detail in values.items()
-    ) or "<tr><td colspan='2'>None.</td></tr>"
+    rows = (
+        "".join(
+            f"<tr><td>{escape(column)}</td><td><code>{escape(json.dumps(detail, sort_keys=True))}"
+            "</code></td></tr>"
+            for column, detail in values.items()
+        )
+        or "<tr><td colspan='2'>None.</td></tr>"
+    )
     return f"<h2>{escape(title)}</h2><table><tbody>{rows}</tbody></table>"
 
 

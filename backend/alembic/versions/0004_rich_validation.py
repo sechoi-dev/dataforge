@@ -33,13 +33,9 @@ def upgrade() -> None:
         name="validation_rule_type",
     )
     severity = sa.Enum("INFO", "WARNING", "CRITICAL", name="validation_severity")
-    result_severity = sa.Enum(
-        "INFO", "WARNING", "CRITICAL", name="validation_result_severity"
-    )
+    result_severity = sa.Enum("INFO", "WARNING", "CRITICAL", name="validation_result_severity")
     op.add_column("dataset_versions", sa.Column("quality_score", sa.Float()))
-    op.add_column(
-        "dataset_versions", sa.Column("html_report_object_key", sa.String(500))
-    )
+    op.add_column("dataset_versions", sa.Column("html_report_object_key", sa.String(500)))
     op.create_unique_constraint(
         "uq_dataset_versions_html_report_key",
         "dataset_versions",
@@ -97,9 +93,7 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.drop_table("validation_results")
     op.drop_table("validation_rules")
-    op.drop_constraint(
-        "uq_dataset_versions_html_report_key", "dataset_versions", type_="unique"
-    )
+    op.drop_constraint("uq_dataset_versions_html_report_key", "dataset_versions", type_="unique")
     op.drop_column("dataset_versions", "html_report_object_key")
     op.drop_column("dataset_versions", "quality_score")
     sa.Enum(name="validation_result_severity").drop(op.get_bind(), checkfirst=True)

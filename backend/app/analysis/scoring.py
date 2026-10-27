@@ -6,9 +6,7 @@ def calculate_quality_score(analysis: dict[str, Any]) -> dict[str, Any]:
     row_count = int(profile["row_count"])
     column_count = int(profile["column_count"])
     total_cells = row_count * column_count
-    total_missing = sum(
-        int(item["missing_count"]) for item in analysis["missing_values"].values()
-    )
+    total_missing = sum(int(item["missing_count"]) for item in analysis["missing_values"].values())
     missing_percentage = total_missing / total_cells * 100 if total_cells else 0.0
     duplicate_percentage = (
         int(profile["duplicate_row_count"]) / row_count * 100 if row_count else 0.0
@@ -56,9 +54,7 @@ def calculate_quality_score(analysis: dict[str, Any]) -> dict[str, Any]:
             float(result["affected_percentage"]) * severity_weights[result["severity"]],
         )
         category_scores["validity"] = max(0.0, category_scores["validity"] - points)
-        deductions.append(
-            _deduction("validity", points, result["severity"], result["message"])
-        )
+        deductions.append(_deduction("validity", points, result["severity"], result["message"]))
 
     weights = {
         "completeness": 0.30,

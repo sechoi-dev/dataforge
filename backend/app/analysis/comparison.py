@@ -42,9 +42,7 @@ def compare_frames(
         "category_changes": categories,
         "overlap": {
             "exact_rows": _exact_overlap(left, right, normalize_text=normalize_text),
-            "selected_keys": _key_overlap(
-                left, right, keys, normalize_text=normalize_text
-            )
+            "selected_keys": _key_overlap(left, right, keys, normalize_text=normalize_text)
             if keys
             else None,
         },
@@ -255,9 +253,7 @@ def _key_overlap(
     return result
 
 
-def _row_hashes(
-    frame: pd.DataFrame, columns: list[Any], normalize_text: bool
-) -> Counter[str]:
+def _row_hashes(frame: pd.DataFrame, columns: list[Any], normalize_text: bool) -> Counter[str]:
     hashes: Counter[str] = Counter()
     for values in frame[columns].itertuples(index=False, name=None):
         normalized = [_normalize(value, normalize_text) for value in values]
@@ -301,9 +297,7 @@ def _validate_keys(left: pd.DataFrame, right: pd.DataFrame, keys: list[str]) -> 
         )
 
 
-def _change(
-    change_type: str, severity: str, message: str, **details: Any
-) -> dict[str, Any]:
+def _change(change_type: str, severity: str, message: str, **details: Any) -> dict[str, Any]:
     return {
         "type": change_type,
         "severity": severity,

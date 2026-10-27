@@ -78,9 +78,7 @@ def analyze_csv(
     )
     analysis["quality_score"] = calculate_quality_score(analysis)
     analysis["recommendations"] = _recommendations(analysis)
-    analysis["profile"]["processing_duration_ms"] = round(
-        (perf_counter() - started) * 1000, 2
-    )
+    analysis["profile"]["processing_duration_ms"] = round((perf_counter() - started) * 1000, 2)
     return analysis
 
 

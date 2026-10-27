@@ -134,9 +134,7 @@ def run_analysis_job(
             storage.put_bytes(html_key, html_bytes, "text/html; charset=utf-8")
 
             session.execute(
-                delete(ValidationResult).where(
-                    ValidationResult.dataset_version_id == version.id
-                )
+                delete(ValidationResult).where(ValidationResult.dataset_version_id == version.id)
             )
             for result in [
                 *analysis["automatic_issues"],

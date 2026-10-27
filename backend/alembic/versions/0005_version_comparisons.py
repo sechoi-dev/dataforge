@@ -31,12 +31,8 @@ def upgrade() -> None:
         sa.Column("error_message", sa.Text()),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
         sa.Column("completed_at", sa.DateTime(timezone=True)),
-        sa.ForeignKeyConstraint(
-            ["left_version_id"], ["dataset_versions.id"], ondelete="CASCADE"
-        ),
-        sa.ForeignKeyConstraint(
-            ["right_version_id"], ["dataset_versions.id"], ondelete="CASCADE"
-        ),
+        sa.ForeignKeyConstraint(["left_version_id"], ["dataset_versions.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["right_version_id"], ["dataset_versions.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint(
             "left_version_id",

@@ -150,9 +150,7 @@ def create_comparison(
 
 
 @router.get("/{comparison_id}", response_model=ComparisonRead)
-def get_comparison(
-    comparison_id: uuid.UUID, db: Annotated[Session, Depends(get_db)]
-) -> Comparison:
+def get_comparison(comparison_id: uuid.UUID, db: Annotated[Session, Depends(get_db)]) -> Comparison:
     comparison = db.get(Comparison, comparison_id)
     if comparison is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Comparison not found.")
@@ -176,7 +174,5 @@ def download_comparison_report(
     return Response(
         storage.get_bytes(comparison.result_object_key),
         media_type="application/json",
-        headers={
-            "Content-Disposition": f'attachment; filename="comparison-{comparison.id}.json"'
-        },
+        headers={"Content-Disposition": f'attachment; filename="comparison-{comparison.id}.json"'},
     )

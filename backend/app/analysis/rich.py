@@ -36,9 +36,7 @@ def rich_profile(frame: pd.DataFrame) -> dict[str, Any]:
         normalized_types = set(observed_types)
         is_mixed = len(normalized_types) > 1 and not normalized_types <= {"integer", "float"}
         if is_mixed:
-            message = (
-                f"Column '{name}' contains mixed apparent types: {', '.join(observed_types)}."
-            )
+            message = f"Column '{name}' contains mixed apparent types: {', '.join(observed_types)}."
             issue = {
                 "column": name,
                 "observed_types": observed_types,
@@ -139,9 +137,7 @@ def _automatic(
         "status": "observed",
         "severity": severity,
         "affected_count": affected_count,
-        "affected_percentage": round(affected_count / row_count * 100, 4)
-        if row_count
-        else 0.0,
+        "affected_percentage": round(affected_count / row_count * 100, 4) if row_count else 0.0,
         "message": message,
         "details": {"column": column},
     }
