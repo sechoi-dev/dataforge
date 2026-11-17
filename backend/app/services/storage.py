@@ -48,6 +48,9 @@ class StorageService:
             response.close()
             response.release_conn()
 
+    def remove_object(self, object_key: str) -> None:
+        self.client.remove_object(self.settings.minio_bucket, object_key)
+
     def check_connection(self) -> bool:
         try:
             self.client.bucket_exists(self.settings.minio_bucket)

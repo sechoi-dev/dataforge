@@ -1,10 +1,11 @@
 # DataForge
 
-DataForge is a distributed data-quality and dataset-validation platform. The repository
-currently includes **Phase 5: Version comparison**. Users can define dataset validation rules,
+DataForge is a distributed data-quality and dataset-validation platform implementing the complete
+ten-phase plan. Users can define dataset validation rules,
 upload a CSV version idempotently, poll its background job, inspect attempts, and retrieve JSON
 or HTML quality reports with explainable scores and deductions. Versions can be compared for
-schema and profile drift, category changes, and dataset overlap.
+schema and profile drift, category changes, and dataset overlap. Jobs expose durable progress,
+cooperative cancellation, scheduled dispatch, worker leases, and killed-worker recovery.
 
 ## Current services
 
@@ -18,6 +19,9 @@ schema and profile drift, category changes, and dataset overlap.
 - Persisted validation results and explainable quality scoring
 - JSON and escaped, human-readable HTML reports
 - Persisted, downloadable version-comparison reports with severity-classified changes
+- Durable scheduled jobs, progress events, cancellation, leases, and crash recovery
+- JSON logs, correlation IDs, Prometheus metrics, and a provisioned Grafana dashboard
+- Responsive browser workflow for datasets, versions, reports, jobs, and comparisons
 - Ruff, mypy, pytest, and GitHub Actions checks
 
 ## Start locally
@@ -28,7 +32,9 @@ Requirements: Docker with Compose v2.
 docker compose up --build
 ```
 
-Then open <http://localhost:8000/docs>, or check:
+Then open the dashboard at <http://localhost:8080>, API documentation at
+<http://localhost:8000/docs>, Grafana at <http://localhost:3000> (`admin` / `dataforge`), or
+Prometheus at <http://localhost:9090>. You can also check:
 
 ```bash
 curl http://localhost:8000/health
@@ -69,6 +75,10 @@ Create dataset-level validation rules before uploading a version at
 numeric bounds and ranges, allowed values, regular expressions, expected types, parseable dates,
 minimum row counts, and maximum missing or duplicate percentages. Retrieve the readable HTML
 report by adding `?format=html` to the report URL.
+
+Uploads accept optional `scheduled_at` (timezone-aware ISO timestamp) and `priority` form fields.
+Poll a job to read its progress fields or retrieve the durable timeline at
+`GET /api/v1/jobs/JOB_ID/events`. Cancel and retry controls are available through the API and UI.
 
 Compare two versions, optionally using identifier columns and normalized text for overlap:
 
@@ -114,5 +124,19 @@ Analysis includes numeric and categorical summaries, mixed-type detection, exact
 IQR outlier observations, custom validation rules, and an explainable weighted quality score.
 Reports are stored as JSON and escaped standalone HTML. Transient failures use exponential
 backoff with jitter and eventually dead-letter while preserving attempt history; malformed CSVs
-fail immediately. Progress and cancellation, crash recovery, authentication, frontend, and
-observability belong to later phases in `docs/master-spec.md`.
+fail immediately. Scheduled work is claimed durably by Celery Beat. Workers renew leases at safe
+checkpoints; expired leases are recovered into a new attempt. Authentication and arbitrary user
+code execution remain explicit non-goals.
+
+## Evidence and demonstration
+
+- [Architecture](docs/architecture.md)
+- [Job state machine](docs/state-machine.md)
+- [Failure model](docs/failure-model.md)
+- [Scoring methodology](docs/scoring-methodology.md)
+- [Benchmark procedure and recorded results](docs/benchmarks.md)
+- [Three-minute demo](docs/demo.md)
+
+The k6 scenario in `load-tests/k6.js` exercises 50-job runs and duplicate submissions. Benchmark
+documentation distinguishes recorded measurements from pending runs; no numbers are estimated or
+fabricated.

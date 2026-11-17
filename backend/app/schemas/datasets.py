@@ -54,6 +54,16 @@ class JobRead(BaseModel):
     retry_count: int
     max_retries: int
     next_retry_at: datetime | None
+    priority: int
+    scheduled_at: datetime | None
+    queued_at: datetime | None
+    progress_percent: int
+    progress_message: str
+    current_stage: str
+    cancel_requested_at: datetime | None
+    cancelled_at: datetime | None
+    worker_id: str | None
+    lease_expires_at: datetime | None
     error_code: str | None
     error_message: str | None
     created_at: datetime
@@ -68,11 +78,22 @@ class JobAttemptRead(BaseModel):
     job_id: uuid.UUID
     attempt_number: int
     status: str
+    worker_id: str | None
     started_at: datetime
     finished_at: datetime | None
     duration_ms: int | None
     error_code: str | None
     error_message: str | None
+
+
+class JobEventRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    job_id: uuid.UUID
+    event_type: str
+    payload_json: dict[str, Any]
+    created_at: datetime
 
 
 class UploadAccepted(BaseModel):

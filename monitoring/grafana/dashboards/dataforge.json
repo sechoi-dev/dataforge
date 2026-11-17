@@ -1,0 +1,31 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "panels": [
+    {
+      "title": "API request rate",
+      "type": "timeseries",
+      "targets": [{"expr": "sum by (route, status) (rate(dataforge_http_requests_total[5m]))", "legendFormat": "{{route}} {{status}}"}],
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0}
+    },
+    {
+      "title": "95th percentile request latency",
+      "type": "timeseries",
+      "targets": [{"expr": "histogram_quantile(0.95, sum by (le, route) (rate(dataforge_http_request_duration_seconds_bucket[5m])))", "legendFormat": "{{route}}"}],
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0}
+    },
+    {
+      "title": "Job outcomes",
+      "type": "stat",
+      "targets": [{"expr": "sum by (status) (dataforge_job_outcomes_total)", "legendFormat": "{{status}}"}],
+      "gridPos": {"h": 7, "w": 24, "x": 0, "y": 8}
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": ["dataforge"],
+  "templating": {"list": []},
+  "time": {"from": "now-1h", "to": "now"},
+  "title": "DataForge Overview",
+  "uid": "dataforge-overview",
+  "version": 1
+}

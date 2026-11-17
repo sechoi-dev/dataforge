@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="DataForge data quality dashboard" />
+    <title>DataForge</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <button class="brand" data-view="dashboard">DataForge</button>
+      <nav>
+        <button data-view="dashboard">Dashboard</button>
+        <button data-view="datasets">Datasets</button>
+        <button data-view="jobs">Jobs</button>
+        <button data-view="compare">Compare</button>
+      </nav>
+      <span id="system-status" class="status-pill">Checking API…</span>
+    </header>
+    <main id="app" aria-live="polite"></main>
+    <div id="toast" role="status"></div>
+    <script src="/app.js" defer></script>
+  </body>
+</html>

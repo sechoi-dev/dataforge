@@ -18,9 +18,19 @@ def client() -> Generator[TestClient, None, None]:
 
 
 def test_health_is_live(client: TestClient) -> None:
-    response = client.get("/health")
+    response = client.get("/health", headers={"X-Request-ID": "health-check-123"})
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+    assert response.headers["X-Request-ID"] == "health-check-123"
+
+
+def test_metrics_are_exposed_without_high_cardinality_ids(client: TestClient) -> None:
+    client.get("/health")
+    response = client.get("/metrics")
+
+    assert response.status_code == 200
+    assert "dataforge_http_requests_total" in response.text
+    assert 'route="/health"' in response.text
 
 
 def test_ready_when_dependencies_are_available(

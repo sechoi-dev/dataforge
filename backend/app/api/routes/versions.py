@@ -1,5 +1,6 @@
 import hashlib
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Annotated, Literal
@@ -21,7 +22,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
-from app.db.models import Dataset, DatasetVersion, Job
+from app.core.observability import request_id_context
+from app.db.models import Dataset, DatasetVersion, Job, JobEvent, JobStatus
 from app.db.session import get_db
 from app.schemas.datasets import DatasetVersionRead, UploadAccepted
 from app.services.idempotency import input_object_key, request_fingerprint
@@ -88,6 +90,8 @@ def upload_version(
     storage: Annotated[StorageService, Depends(get_storage)],
     idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=200)],
     description: Annotated[str | None, Form(max_length=2_000)] = None,
+    scheduled_at: Annotated[datetime | None, Form()] = None,
+    priority: Annotated[int, Form(ge=-100, le=100)] = 0,
 ) -> UploadAccepted:
     dataset = db.get(Dataset, dataset_id)
     if dataset is None:
@@ -112,6 +116,13 @@ def upload_version(
             detail="Idempotency-Key cannot be blank.",
         )
     content_type = file.content_type or "text/csv"
+    if scheduled_at is not None and scheduled_at.tzinfo is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="scheduled_at must include a timezone.",
+        )
+    now = datetime.now(UTC)
+    is_scheduled = scheduled_at is not None and scheduled_at > now
     version_id = uuid.uuid4()
     with TemporaryDirectory(prefix="dataforge-upload-") as temporary_directory:
         input_path = Path(temporary_directory) / "input.csv"
@@ -122,6 +133,8 @@ def upload_version(
             filename=safe_filename,
             content_type=content_type,
             description=description,
+            scheduled_at=scheduled_at,
+            priority=priority,
         )
         existing = find_idempotent_job(db, idempotency_key, fingerprint)
         if existing is not None:
@@ -157,10 +170,28 @@ def upload_version(
         dataset_version=version,
         idempotency_key=idempotency_key,
         request_fingerprint=fingerprint,
+        correlation_id=request_id_context.get(),
         max_retries=settings.job_max_retries,
+        status=JobStatus.SCHEDULED if is_scheduled else JobStatus.QUEUED,
+        priority=priority,
+        scheduled_at=scheduled_at,
+        queued_at=None if is_scheduled else now,
+        progress_message="Scheduled" if is_scheduled else "Queued",
+        current_stage="scheduled" if is_scheduled else "queued",
     )
     db.add_all([version, job])
     try:
+        db.flush()
+        db.add(
+            JobEvent(
+                job_id=job.id,
+                event_type="job_scheduled" if is_scheduled else "job_queued",
+                payload_json={
+                    "progress_percent": 0,
+                    "stage": "scheduled" if is_scheduled else "queued",
+                },
+            )
+        )
         db.commit()
     except IntegrityError:
         db.rollback()
@@ -173,7 +204,8 @@ def upload_version(
         ) from None
     db.refresh(version)
     db.refresh(job)
-    enqueue_analysis(str(job.id))
+    if not is_scheduled:
+        enqueue_analysis(str(job.id))
     return accepted_response(db, job)
 
 

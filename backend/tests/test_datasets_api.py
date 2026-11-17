@@ -1,4 +1,6 @@
+import uuid
 from collections.abc import Generator
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -241,3 +243,66 @@ def test_compare_versions_and_download_report(
     assert report_response.status_code == 200
     assert "attachment" in report_response.headers["content-disposition"]
     assert report_response.json()["overlap"]["selected_keys"]["overlapping_row_count"] == 1
+
+
+def test_queued_job_cancels_immediately_and_records_events(
+    api_context: tuple[TestClient, sessionmaker[Session], FakeStorage, list[str]],
+) -> None:
+    client, _, _, _ = api_context
+    dataset_id = client.post("/api/v1/datasets", json={"name": "Cancellation"}).json()["id"]
+    upload = client.post(
+        f"/api/v1/datasets/{dataset_id}/versions",
+        headers={"Idempotency-Key": "cancel-before-start"},
+        files={"file": ("cancel.csv", b"id\n1\n", "text/csv")},
+    ).json()
+    job_id = uuid.UUID(upload["job"]["id"])
+
+    cancelled = client.post(f"/api/v1/jobs/{job_id}/cancel")
+
+    assert cancelled.status_code == 202
+    assert cancelled.json()["status"] == "CANCELLED"
+    assert cancelled.json()["current_stage"] == "cancelled"
+    events = client.get(f"/api/v1/jobs/{job_id}/events").json()
+    assert [event["event_type"] for event in events] == ["job_queued", "job_cancelled"]
+
+
+def test_completed_job_cannot_be_cancelled(
+    api_context: tuple[TestClient, sessionmaker[Session], FakeStorage, list[str]],
+) -> None:
+    client, sessions, _, _ = api_context
+    dataset_id = client.post("/api/v1/datasets", json={"name": "Completed"}).json()["id"]
+    upload = client.post(
+        f"/api/v1/datasets/{dataset_id}/versions",
+        headers={"Idempotency-Key": "completed-job"},
+        files={"file": ("complete.csv", b"id\n1\n", "text/csv")},
+    ).json()
+    job_id = uuid.UUID(upload["job"]["id"])
+    with sessions() as session:
+        job = session.get(Job, job_id)
+        assert job is not None
+        job.status = JobStatus.SUCCEEDED
+        session.commit()
+
+    response = client.post(f"/api/v1/jobs/{job_id}/cancel")
+
+    assert response.status_code == 409
+
+
+def test_future_upload_is_persisted_without_immediate_enqueue(
+    api_context: tuple[TestClient, sessionmaker[Session], FakeStorage, list[str]],
+) -> None:
+    client, _, _, queued_jobs = api_context
+    dataset_id = client.post("/api/v1/datasets", json={"name": "Scheduled"}).json()["id"]
+    future = datetime.now(UTC) + timedelta(hours=1)
+
+    response = client.post(
+        f"/api/v1/datasets/{dataset_id}/versions",
+        headers={"Idempotency-Key": "scheduled-upload"},
+        files={"file": ("scheduled.csv", b"id\n1\n", "text/csv")},
+        data={"scheduled_at": future.isoformat(), "priority": "10"},
+    )
+
+    assert response.status_code == 202
+    assert response.json()["job"]["status"] == "SCHEDULED"
+    assert response.json()["job"]["current_stage"] == "scheduled"
+    assert queued_jobs == []

@@ -1,6 +1,7 @@
 import hashlib
 import json
 import uuid
+from datetime import datetime
 
 
 def request_fingerprint(
@@ -10,6 +11,8 @@ def request_fingerprint(
     filename: str,
     content_type: str,
     description: str | None,
+    scheduled_at: datetime | None = None,
+    priority: int = 0,
 ) -> str:
     payload = {
         "content_type": content_type,
@@ -17,6 +20,8 @@ def request_fingerprint(
         "description": description,
         "file_sha256": file_sha256,
         "filename": filename,
+        "scheduled_at": scheduled_at.isoformat() if scheduled_at else None,
+        "priority": priority,
     }
     encoded = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
     return hashlib.sha256(encoded).hexdigest()

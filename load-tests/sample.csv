@@ -1,0 +1,5 @@
+id,email,age,status,score
+1,ada@example.com,36,active,91
+2,grace@example.com,42,active,95
+3,linus@example.com,55,inactive,88
+4,margaret@example.com,31,active,93

@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     job_max_retries: int = Field(default=3, ge=0, le=20)
     retry_base_seconds: float = Field(default=2.0, gt=0)
     retry_maximum_seconds: float = Field(default=300.0, gt=0)
+    worker_lease_seconds: int = Field(default=60, ge=10, le=3_600)
+    scheduler_batch_size: int = Field(default=100, ge=1, le=1_000)
+    failure_injection_stage: str | None = None
     readiness_timeout_seconds: float = Field(default=2.0, gt=0, le=30)
 
 

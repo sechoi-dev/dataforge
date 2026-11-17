@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
@@ -23,12 +23,14 @@ from app.db.base import Base
 
 
 class JobStatus(StrEnum):
+    SCHEDULED = "SCHEDULED"
     QUEUED = "QUEUED"
     RUNNING = "RUNNING"
     RETRYING = "RETRYING"
     SUCCEEDED = "SUCCEEDED"
     FAILED = "FAILED"
     DEAD_LETTERED = "DEAD_LETTERED"
+    CANCELLED = "CANCELLED"
 
 
 class RuleType(StrEnum):
@@ -122,9 +124,20 @@ class Job(Base):
     )
     idempotency_key: Mapped[str | None] = mapped_column(String(200), unique=True)
     request_fingerprint: Mapped[str | None] = mapped_column(String(64))
+    correlation_id: Mapped[str | None] = mapped_column(String(128), index=True)
+    priority: Mapped[int] = mapped_column(Integer, default=0)
+    scheduled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    queued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     retry_count: Mapped[int] = mapped_column(Integer, default=0)
     max_retries: Mapped[int] = mapped_column(Integer, default=3)
     next_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    progress_percent: Mapped[int] = mapped_column(Integer, default=0)
+    progress_message: Mapped[str] = mapped_column(String(255), default="Queued")
+    current_stage: Mapped[str] = mapped_column(String(100), default="queued")
+    cancel_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    worker_id: Mapped[str | None] = mapped_column(String(255))
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     error_code: Mapped[str | None] = mapped_column(String(100))
     error_message: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -138,6 +151,9 @@ class Job(Base):
     attempts: Mapped[list["JobAttempt"]] = relationship(
         back_populates="job", cascade="all, delete-orphan", order_by="JobAttempt.attempt_number"
     )
+    events: Mapped[list["JobEvent"]] = relationship(
+        back_populates="job", cascade="all, delete-orphan", order_by="JobEvent.created_at"
+    )
 
 
 class JobAttempt(Base):
@@ -148,6 +164,7 @@ class JobAttempt(Base):
     job_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("jobs.id", ondelete="CASCADE"), index=True)
     attempt_number: Mapped[int] = mapped_column(Integer)
     status: Mapped[str] = mapped_column(String(30))
+    worker_id: Mapped[str | None] = mapped_column(String(255))
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     duration_ms: Mapped[int | None] = mapped_column(BigInteger)
@@ -156,6 +173,20 @@ class JobAttempt(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     job: Mapped[Job] = relationship(back_populates="attempts")
+
+
+class JobEvent(Base):
+    __tablename__ = "job_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    job_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("jobs.id", ondelete="CASCADE"), index=True)
+    event_type: Mapped[str] = mapped_column(String(100))
+    payload_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), server_default=func.now()
+    )
+
+    job: Mapped[Job] = relationship(back_populates="events")
 
 
 class ValidationRule(Base):
